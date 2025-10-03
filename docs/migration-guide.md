@@ -109,6 +109,32 @@ cd C:\actions-runner
 
 ### Step 5: Update Workflow Files
 
+You can update workflows manually or use the automated migration script.
+
+#### Option A: Automated Migration (Recommended)
+
+Use the migration script to automatically update all workflows:
+
+```powershell
+# Preview changes (dry-run mode)
+.\scripts\migrate-to-self-hosted.ps1 -DryRun
+
+# Apply migration with default labels
+.\scripts\migrate-to-self-hosted.ps1
+
+# Apply migration with custom labels
+.\scripts\migrate-to-self-hosted.ps1 -RunnerLabels "self-hosted,windows,x64"
+```
+
+The script will:
+- ✅ Scan all workflow files in `.github/workflows`
+- ✅ Detect GitHub-hosted runners (ubuntu-latest, windows-latest, etc.)
+- ✅ Backup original workflows to `.github/workflows.backup`
+- ✅ Update `runs-on` configurations to use self-hosted runners
+- ✅ Provide a detailed migration report
+
+#### Option B: Manual Migration
+
 Update your workflow files to use the self-hosted runner:
 
 **Before (GitHub-hosted):**
