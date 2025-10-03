@@ -69,10 +69,10 @@ jobs:
             )
 
             if ($parseErrors.Count -gt 0) {
-              $errors += "❌ $($script.Name): $($parseErrors.Count) errors"
+              $errors += "[ERROR] $($script.Name): $($parseErrors.Count) errors"
               $parseErrors | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
             } else {
-              Write-Host "✓ $($script.Name)" -ForegroundColor Green
+              Write-Host "[OK] $($script.Name)" -ForegroundColor Green
             }
           }
 
@@ -81,7 +81,7 @@ jobs:
             exit 1
           }
 
-          Write-Host "✓ All scripts have valid syntax" -ForegroundColor Green
+          Write-Host "[OK] All scripts have valid syntax" -ForegroundColor Green
 
       - name: Validate Workflow Files
         shell: powershell
@@ -94,20 +94,20 @@ jobs:
 
             # Check for tabs (YAML should use spaces)
             if ($content -match "`t") {
-              Write-Error "❌ $($workflow.Name) contains tab characters"
+              Write-Error "[ERROR] $($workflow.Name) contains tab characters"
               exit 1
             }
 
             # Check for required fields
             if ($content -notmatch "^name:") {
-              Write-Error "❌ $($workflow.Name) missing 'name:' field"
+              Write-Error "[ERROR] $($workflow.Name) missing 'name:' field"
               exit 1
             }
 
-            Write-Host "✓ $($workflow.Name)" -ForegroundColor Green
+            Write-Host "[OK] $($workflow.Name)" -ForegroundColor Green
           }
 
-          Write-Host "✓ All workflow files are valid" -ForegroundColor Green
+          Write-Host "[OK] All workflow files are valid" -ForegroundColor Green
 
   security-scan:
     name: Security Scan
@@ -140,7 +140,7 @@ jobs:
 
             foreach ($pattern in $patterns.GetEnumerator()) {
               if ($content -match $pattern.Value) {
-                $findings += "⚠️ $($file.Name): Potential $($pattern.Key) found"
+                $findings += "[WARNING] $($file.Name): Potential $($pattern.Key) found"
               }
             }
           }
@@ -149,7 +149,7 @@ jobs:
             $findings | ForEach-Object { Write-Warning $_ }
             Write-Warning "Found $($findings.Count) potential secret(s). Please review."
           } else {
-            Write-Host "✓ No secrets detected" -ForegroundColor Green
+            Write-Host "[OK] No secrets detected" -ForegroundColor Green
           }
 
       - name: Check for Hardcoded Paths
@@ -167,12 +167,12 @@ jobs:
             # Check for C:\ paths that aren't in examples
             if ($content -match 'C:\\(?!actions-runner|Code\\ActionRunner)[\w\\-]+' -and
                 $content -notmatch '\.EXAMPLE') {
-              $warnings += "⚠️ $($script.Name) may contain hardcoded paths"
+              $warnings += "[WARNING] $($script.Name) may contain hardcoded paths"
             }
           }
 
           if ($warnings.Count -gt 0) {
             $warnings | ForEach-Object { Write-Warning $_ }
           } else {
-            Write-Host "✓ No hardcoded paths found" -ForegroundColor Green
+            Write-Host "[OK] No hardcoded paths found" -ForegroundColor Green
           }
