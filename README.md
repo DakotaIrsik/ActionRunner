@@ -18,7 +18,7 @@ mkdir C:\actions-runner
 cd C:\actions-runner
 
 # Download the latest runner (check GitHub for current version)
-Invoke-WebRequest -Uri https://github.com/actions/runner/releases/download/v2.311.0/actions-runner-win-x64-2.311.0.zip -OutFile actions-runner-win-x64.zip
+Invoke-WebRequest -Uri https://github.com/actions/runner/releases/download/v2.328.0/actions-runner-win-x64-2.328.0.zip -OutFile actions-runner-win-x64.zip
 
 # Extract
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -47,6 +47,7 @@ notepad .\config\firewall-rules.yaml
 
 ```powershell
 # Configure the runner (use the service account created above)
+# Replace YOUR-ORG and YOUR-REPO with your GitHub organization/repository
 .\config.cmd --url https://github.com/YOUR-ORG/YOUR-REPO --token YOUR-TOKEN --runasservice
 
 # When prompted, use the GitHubRunner account created by runner-user-setup.ps1
@@ -79,6 +80,12 @@ This repository includes comprehensive security controls:
 
 ## Documentation
 
+- **[Migration Guide](docs/migration-guide.md)**: Step-by-step guide for migrating to self-hosted runner
+  - Environment setup automation
+  - Security configuration
+  - Jesus project specific requirements
+  - Troubleshooting and rollback procedures
+
 - **[Security Guide](docs/security.md)**: Comprehensive security documentation
   - Security risks and mitigation strategies
   - Network isolation and firewall configuration
@@ -87,11 +94,27 @@ This repository includes comprehensive security controls:
   - Monitoring and incident response
   - Compliance considerations
 
+- **[macOS/iOS Build Integration](docs/ios-builds.md)**: Guide for hybrid runner setup
+  - Cost analysis: GitHub-hosted vs self-hosted Mac
+  - React Native iOS build workflows
+  - Code signing setup and requirements
+
 ## Configuration Files
 
+- **[scripts/setup-runner-environment.ps1](scripts/setup-runner-environment.ps1)**: Automated environment setup for Node.js, Python, Docker
 - **[config/firewall-rules.yaml](config/firewall-rules.yaml)**: Windows Firewall rules configuration
 - **[config/runner-user-setup.ps1](config/runner-user-setup.ps1)**: Service account creation script
 - **[config/apply-firewall-rules.ps1](config/apply-firewall-rules.ps1)**: Firewall rules application script
+
+## Development
+
+This repository includes automated testing via GitHub Actions CI:
+
+- **PowerShell Script Tests**: Validates all scripts with Pester
+- **Configuration Validation**: Checks YAML syntax and workflow files
+- **Security Scanning**: Detects potential secrets and hardcoded paths
+
+See [.github/workflows/ci.yml](.github/workflows/ci.yml) for details.
 
 ## Prerequisites
 
