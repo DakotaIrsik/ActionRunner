@@ -29,8 +29,15 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 **Before configuring the runner, implement security controls:**
 
+Clone this repository and run the security scripts:
+
 ```powershell
 # Run as Administrator
+cd C:\
+
+# Clone the ActionRunner repository
+git clone https://github.com/DakotaIrsik/ActionRunner.git
+cd ActionRunner
 
 # Step 1: Create secure service account with limited permissions
 .\config\runner-user-setup.ps1
@@ -38,7 +45,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 # Step 2: Apply firewall rules for network isolation
 .\config\apply-firewall-rules.ps1
 
-# Step 3: Review and customize security settings
+# Step 3: Review security settings
 notepad .\docs\security.md
 notepad .\config\firewall-rules.yaml
 ```
@@ -47,8 +54,9 @@ notepad .\config\firewall-rules.yaml
 
 ```powershell
 # Configure the runner (use the service account created above)
-# Replace YOUR-ORG and YOUR-REPO with your GitHub organization/repository
-.\config.cmd --url https://github.com/YOUR-ORG/YOUR-REPO --token YOUR-TOKEN --runasservice
+# Replace YOUR-REPO with your target repository name (e.g., qiflow, gifdistributor)
+# Get YOUR-TOKEN from GitHub: Settings → Actions → Runners → New self-hosted runner
+.\config.cmd --url https://github.com/DakotaIrsik/YOUR-REPO --token YOUR-TOKEN --runasservice
 
 # When prompted, use the GitHubRunner account created by runner-user-setup.ps1
 ```
@@ -67,6 +75,154 @@ cd C:\actions-runner
 .\run.cmd
 ```
 
+## Using the Self-Hosted Runners
+
+### Available Runners
+
+The following self-hosted runners are configured and available:
+
+| Repository | Runner Labels | Docker Support |
+|------------|---------------|----------------|
+| **ActionRunner** | `self-hosted`, `windows`, `docker` | ✅ |
+| **qiflow** | `self-hosted`, `windows`, `docker` | ✅ |
+| **qiflowgo** | `self-hosted`, `windows`, `docker` | ✅ |
+| **gifdistributor** | `self-hosted`, `windows`, `docker` | ✅ |
+
+**Note**: The `docker` label is optional. Use `runs-on: [self-hosted, windows]` for standard workflows, or add `docker` when you need container isolation.
+
+### Workflow Configuration
+
+To use the self-hosted runners in your GitHub Actions workflows, specify the runner labels in the `runs-on` field:
+
+```yaml
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, feature/* ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: [self-hosted, windows, docker]  # Use self-hosted runner
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        shell: powershell  # Use 'powershell' not 'pwsh'
+        run: |
+          Write-Host "Running tests..."
+          # Your test commands here
+```
+
+### Shell Compatibility
+
+**IMPORTANT:** Use `shell: powershell` (Windows PowerShell) instead of `shell: pwsh` (PowerShell Core):
+
+```yaml
+# ✅ CORRECT - Use Windows PowerShell
+- name: My Step
+  shell: powershell
+  run: |
+    Write-Host "This works!"
+
+# ❌ INCORRECT - PowerShell Core not installed
+- name: My Step
+  shell: pwsh
+  run: |
+    Write-Host "This fails!"
+```
+
+### Docker Isolation
+
+All runners support Docker for containerized builds:
+
+```yaml
+jobs:
+  docker-build:
+    runs-on: [self-hosted, windows, docker]
+
+    steps:
+      - name: Build in Docker
+        shell: powershell
+        run: |
+          docker build -t myapp .
+          docker run --rm myapp npm test
+```
+
+### Example Workflows
+
+See the workflow in this repository for a complete example:
+- **[.github/workflows/ci.yml](.github/workflows/ci.yml)** - CI/CD pipeline with tests and validation
+
+### Best Practices
+
+1. **Always specify runner labels explicitly**: `runs-on: [self-hosted, windows, docker]`
+2. **Use `powershell` shell**: Avoid `pwsh` as PowerShell Core is not installed
+3. **Avoid UTF-8 special characters**: Use `[OK]` instead of `✓` in PowerShell output
+4. **Clean up after jobs**: Use `if: always()` for cleanup steps
+5. **Use Docker for untrusted code**: Isolate builds in containers when possible
+
+## Jesus Project Runner Setup
+
+For the **Jesus MCP Agentic AI Platform** project, which requires Node.js, Python, and Docker support, use the development stack installation script:
+
+### Quick Setup (Windows)
+
+```powershell
+# 1. Clone this repository
+git clone https://github.com/DakotaIrsik/ActionRunner.git
+cd ActionRunner
+
+# 2. Run the environment setup script
+.\scripts\setup-runner-environment.ps1
+
+# 3. Verify installation
+node --version     # Should show v20.x
+pnpm --version     # Should show 9.x
+python --version   # Should show 3.11.x
+docker --version
+```
+
+### Stack Components
+
+The setup script (`setup-runner-environment.ps1`) installs:
+
+- **Node.js 20.x** with **pnpm 9.x** for JavaScript/TypeScript builds
+- **Python 3.11** with **pip**, **pip-audit**, and **detect-secrets** for security scanning
+- **Docker** verification and configuration
+- **OSV Scanner** for vulnerability scanning
+
+### Usage in Jesus Workflows
+
+Update your Jesus project workflows to use the self-hosted runner:
+
+```yaml
+# .github/workflows/ci.yml
+jobs:
+  build:
+    runs-on: [self-hosted, windows, docker]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        shell: powershell
+        run: pnpm install
+
+      - name: Run build
+        shell: powershell
+        run: pnpm build
+
+      - name: Run tests
+        shell: powershell
+        run: pnpm test
+```
+
 ## Security Features
 
 This repository includes comprehensive security controls:
@@ -80,41 +236,20 @@ This repository includes comprehensive security controls:
 
 ## Documentation
 
-- **[Migration Guide](docs/migration-guide.md)**: Step-by-step guide for migrating to self-hosted runner
-  - Environment setup automation
-  - Security configuration
-  - Jesus project specific requirements
-  - Troubleshooting and rollback procedures
-
-- **[Security Guide](docs/security.md)**: Comprehensive security documentation
-  - Security risks and mitigation strategies
-  - Network isolation and firewall configuration
-  - Token management and rotation
-  - Container isolation with Docker
-  - Monitoring and incident response
-  - Compliance considerations
-
-- **[macOS/iOS Build Integration](docs/ios-builds.md)**: Guide for hybrid runner setup
-  - Cost analysis: GitHub-hosted vs self-hosted Mac
-  - React Native iOS build workflows
-  - Code signing setup and requirements
+- **[Security Guide](docs/security.md)**: Comprehensive security documentation covering risks, network isolation, token management, container isolation, monitoring, and compliance
+- **[Migration Guide](docs/migration-guide.md)**: Step-by-step guide for migrating to self-hosted runners
+- **[iOS Builds Guide](docs/ios-builds.md)**: macOS runner setup and iOS build integration
 
 ## Configuration Files
 
-- **[scripts/setup-runner-environment.ps1](scripts/setup-runner-environment.ps1)**: Automated environment setup for Node.js, Python, Docker
+### Configuration Scripts
 - **[config/firewall-rules.yaml](config/firewall-rules.yaml)**: Windows Firewall rules configuration
 - **[config/runner-user-setup.ps1](config/runner-user-setup.ps1)**: Service account creation script
 - **[config/apply-firewall-rules.ps1](config/apply-firewall-rules.ps1)**: Firewall rules application script
 
-## Development
-
-This repository includes automated testing via GitHub Actions CI:
-
-- **PowerShell Script Tests**: Validates all scripts with Pester
-- **Configuration Validation**: Checks YAML syntax and workflow files
-- **Security Scanning**: Detects potential secrets and hardcoded paths
-
-See [.github/workflows/ci.yml](.github/workflows/ci.yml) for details.
+### Migration and Setup Scripts
+- **[scripts/migrate-to-self-hosted.ps1](scripts/migrate-to-self-hosted.ps1)**: Automated workflow migration from GitHub-hosted to self-hosted runners
+- **[scripts/setup-runner-environment.ps1](scripts/setup-runner-environment.ps1)**: Environment setup for Node.js, Python, Docker and security tools
 
 ## Prerequisites
 
@@ -151,7 +286,11 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml) for details.
 Stop-Service actions.runner.*
 
 # Download and extract new version (check GitHub for latest)
-# Then re-run config
+Invoke-WebRequest -Uri https://github.com/actions/runner/releases/download/v2.328.0/actions-runner-win-x64-2.328.0.zip -OutFile actions-runner-win-x64.zip
+
+# Extract to runner directory
+cd C:\actions-runner
+Expand-Archive -Path actions-runner-win-x64.zip -DestinationPath . -Force
 
 # Start the service
 Start-Service actions.runner.*
