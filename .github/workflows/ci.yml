@@ -1,0 +1,178 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ main, feature/* ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-powershell-scripts:
+    name: Test PowerShell Scripts
+    runs-on: [self-hosted, windows]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Pester
+        shell: powershell
+        run: |
+          if (-not (Get-Module -ListAvailable -Name Pester | Where-Object Version -ge '5.0.0')) {
+            Install-Module -Name Pester -MinimumVersion 5.0.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          }
+          Import-Module Pester
+
+      - name: Run Pester Tests
+        shell: powershell
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = '.\tests'
+          $config.Run.Exit = $true
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = 'test-results.xml'
+          $config.CodeCoverage.Enabled = $false
+          $config.Output.Verbosity = 'Detailed'
+
+          Invoke-Pester -Configuration $config
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results.xml
+          retention-days: 30
+
+  validate-configuration:
+    name: Validate Configuration
+    runs-on: [self-hosted, windows]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate PowerShell Syntax
+        shell: powershell
+        run: |
+          Write-Host "Validating PowerShell script syntax..." -ForegroundColor Cyan
+          $scriptPaths = @('.\config', '.\scripts')
+          $scripts = $scriptPaths | Where-Object { Test-Path $_ } | Get-ChildItem -Filter "*.ps1" -Recurse
+          $errors = @()
+
+          foreach ($script in $scripts) {
+            $parseErrors = $null
+            $null = [System.Management.Automation.PSParser]::Tokenize(
+              (Get-Content $script.FullName -Raw),
+              [ref]$parseErrors
+            )
+
+            if ($parseErrors.Count -gt 0) {
+              $errors += "[ERROR] $($script.Name): $($parseErrors.Count) errors"
+              $parseErrors | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+            } else {
+              Write-Host "[OK] $($script.Name)" -ForegroundColor Green
+            }
+          }
+
+          if ($errors.Count -gt 0) {
+            Write-Error "Syntax validation failed for $($errors.Count) script(s)"
+            exit 1
+          }
+
+          Write-Host "[OK] All scripts have valid syntax" -ForegroundColor Green
+
+      - name: Validate Workflow Files
+        shell: powershell
+        run: |
+          Write-Host "Validating workflow files..." -ForegroundColor Cyan
+          $workflows = Get-ChildItem -Path .\.github\workflows -Filter "*.yml"
+
+          foreach ($workflow in $workflows) {
+            $content = Get-Content $workflow.FullName -Raw
+
+            # Check for tabs (YAML should use spaces)
+            if ($content -match "`t") {
+              Write-Error "[ERROR] $($workflow.Name) contains tab characters"
+              exit 1
+            }
+
+            # Check for required fields
+            if ($content -notmatch "^name:") {
+              Write-Error "[ERROR] $($workflow.Name) missing 'name:' field"
+              exit 1
+            }
+
+            Write-Host "[OK] $($workflow.Name)" -ForegroundColor Green
+          }
+
+          Write-Host "[OK] All workflow files are valid" -ForegroundColor Green
+
+  security-scan:
+    name: Security Scan
+    runs-on: [self-hosted, windows]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for Secrets
+        shell: powershell
+        run: |
+          Write-Host "Scanning for potential secrets..." -ForegroundColor Cyan
+
+          $patterns = @{
+            'GitHub PAT (classic)' = 'ghp_[a-zA-Z0-9]{36}'
+            'GitHub PAT (fine-grained)' = 'github_pat_[a-zA-Z0-9_]{82}'
+            'GitHub OAuth' = 'gho_[a-zA-Z0-9]{36}'
+            'GitHub App Token' = 'ghs_[a-zA-Z0-9]{36}'
+            'AWS Access Key' = 'AKIA[0-9A-Z]{16}'
+            'Generic Password' = 'password\s*[:=]\s*[''"][^''"]{8,}'
+          }
+
+          $findings = @()
+          $files = Get-ChildItem -Path . -Recurse -Include *.ps1,*.yml,*.yaml,*.json,*.md -File |
+            Where-Object { $_.FullName -notmatch '\\\.git\\' }
+
+          foreach ($file in $files) {
+            $content = Get-Content $file.FullName -Raw
+
+            foreach ($pattern in $patterns.GetEnumerator()) {
+              if ($content -match $pattern.Value) {
+                $findings += "[WARNING] $($file.Name): Potential $($pattern.Key) found"
+              }
+            }
+          }
+
+          if ($findings.Count -gt 0) {
+            $findings | ForEach-Object { Write-Warning $_ }
+            Write-Warning "Found $($findings.Count) potential secret(s). Please review."
+          } else {
+            Write-Host "[OK] No secrets detected" -ForegroundColor Green
+          }
+
+      - name: Check for Hardcoded Paths
+        shell: powershell
+        run: |
+          Write-Host "Checking for hardcoded paths..." -ForegroundColor Cyan
+
+          $scriptPaths = @('.\config', '.\scripts')
+          $scripts = $scriptPaths | Where-Object { Test-Path $_ } | Get-ChildItem -Filter "*.ps1" -Recurse
+          $warnings = @()
+
+          foreach ($script in $scripts) {
+            $content = Get-Content $script.FullName -Raw
+
+            # Check for C:\ paths that aren't in examples
+            if ($content -match 'C:\\(?!actions-runner|Code\\ActionRunner)[\w\\-]+' -and
+                $content -notmatch '\.EXAMPLE') {
+              $warnings += "[WARNING] $($script.Name) may contain hardcoded paths"
+            }
+          }
+
+          if ($warnings.Count -gt 0) {
+            $warnings | ForEach-Object { Write-Warning $_ }
+          } else {
+            Write-Host "[OK] No hardcoded paths found" -ForegroundColor Green
+          }

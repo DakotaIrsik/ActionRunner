@@ -1,0 +1,282 @@
+name: React Native Mobile CI
+
+# This workflow template demonstrates hybrid runner usage:
+# - Android builds on self-hosted Windows runner (free)
+# - iOS builds on GitHub-hosted macOS runner (paid)
+# Perfect for React Native apps like QiFlowGo
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+  JAVA_VERSION: '17'
+
+jobs:
+  # Lint and test on fastest available runner
+  lint-and-test:
+    name: Lint and Test
+    runs-on: [self-hosted, windows, X64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        run: node --version  # Already installed on self-hosted
+
+      - name: Install dependencies
+        run: |
+          npm install -g yarn
+          yarn install --frozen-lockfile
+
+      - name: Run linter
+        run: yarn lint
+
+      - name: Run tests
+        run: yarn test --ci --coverage
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage/coverage-final.json
+
+  # Android build on self-hosted Windows runner (no cost)
+  android:
+    name: Build Android
+    needs: lint-and-test
+    runs-on: [self-hosted, windows, X64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        run: node --version
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('yarn.lock') }}
+
+      - name: Install dependencies
+        run: |
+          npm install -g yarn
+          yarn install --frozen-lockfile
+
+      - name: Build Android APK (Debug)
+        run: |
+          cd android
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Build Android APK (Release)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+
+      - name: Upload Release APK
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+
+  # iOS build on GitHub-hosted macOS runner (paid - optimize for cost)
+  ios:
+    name: Build iOS
+    needs: lint-and-test
+    runs-on: macos-14  # M1 chip - faster but more expensive
+    # Alternative: runs-on: macos-13 (Intel - 50% cheaper but slower)
+
+    # Only build iOS when iOS-related files change (cost optimization)
+    if: |
+      github.ref == 'refs/heads/main' ||
+      contains(github.event.head_commit.modified, 'ios/') ||
+      contains(github.event.head_commit.modified, 'package.json')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+
+      - name: Install dependencies
+        run: |
+          npm install -g yarn
+          yarn install --frozen-lockfile
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: ios/Pods
+          key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
+
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios
+          pod install
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: 'latest-stable'
+
+      - name: Build iOS app (Debug)
+        run: |
+          cd ios
+          xcodebuild \
+            -workspace YourApp.xcworkspace \
+            -scheme YourApp \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            build
+
+      - name: Build iOS app (Release Archive)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd ios
+          xcodebuild \
+            -workspace YourApp.xcworkspace \
+            -scheme YourApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath ./build/YourApp.xcarchive \
+            archive
+
+      # Code signing (only for release builds)
+      - name: Import Code Signing Certificates
+        if: github.ref == 'refs/heads/main'
+        run: |
+          # Create temporary keychain
+          security create-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+
+          # Import certificate
+          echo "${{ secrets.APPLE_DEVELOPER_CERTIFICATE }}" | base64 --decode > certificate.p12
+          security import certificate.p12 -k build.keychain -P "${{ secrets.CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain
+
+          # Import provisioning profile
+          echo "${{ secrets.PROVISIONING_PROFILE }}" | base64 --decode > profile.mobileprovision
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+
+      - name: Export IPA
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd ios
+          xcodebuild \
+            -exportArchive \
+            -archivePath ./build/YourApp.xcarchive \
+            -exportPath ./build \
+            -exportOptionsPlist ./ExportOptions.plist
+
+      - name: Upload IPA
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: ios/build/*.ipa
+          retention-days: 30
+
+      - name: Cleanup Keychain
+        if: always()
+        run: |
+          security delete-keychain build.keychain || true
+
+  # Publish artifacts to GitHub Releases (only on main branch)
+  publish:
+    name: Publish Release
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-release-apk
+          path: ./artifacts
+
+      - name: Download iOS IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-ipa
+          path: ./artifacts
+
+      - name: Generate Release Notes
+        id: release_notes
+        run: |
+          echo "## Mobile Builds - v${{ github.run_number }}" > notes.md
+          echo "" >> notes.md
+          echo "### Changes" >> notes.md
+          git log --pretty=format:"- %s (%an)" -5 >> notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Mobile Release v1.0.${{ github.run_number }}
+          body_path: notes.md
+          files: |
+            artifacts/*.apk
+            artifacts/*.ipa
+          draft: false
+          prerelease: false
+
+  # Notification job (optional - notify team of build status)
+  notify:
+    name: Notify Team
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Send notification
+        run: |
+          echo "Build Status:"
+          echo "Android: ${{ needs.android.result }}"
+          echo "iOS: ${{ needs.ios.result }}"
+          # Add Slack/Discord/Teams webhook here if needed
